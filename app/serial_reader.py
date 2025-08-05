@@ -39,6 +39,17 @@ class DataReader:
         
         print(f"✅ DataReader initialized with socketio: {socketio}")
 
+    def format_date_windows_compatible(self, dt):
+        """Format date in M/D/YYYY format (Windows compatible)"""
+        # Use %m/%d/%Y and then strip leading zeros manually
+        formatted = dt.strftime("%m/%d/%Y")
+        # Remove leading zeros from month and day
+        parts = formatted.split('/')
+        month = str(int(parts[0]))  # Remove leading zero from month
+        day = str(int(parts[1]))    # Remove leading zero from day  
+        year = parts[2]
+        return f"{month}/{day}/{year}"
+
     def generate_realistic_mock_data(self):
         """Generate realistic mock data matching your device format"""
         current_time = time.time()
@@ -57,10 +68,10 @@ class DataReader:
         latest_data["alt"] = round(378.0 + math.sin(elapsed / 120) * 30 + random.uniform(-10, 10), 1)
         latest_data["satellites"] = random.randint(7, 12)
         
-        # Time data
+        # Time data - Windows compatible formatting
         now = datetime.now()
         latest_data["utc_time"] = now.strftime("%H:%M:%S")
-        latest_data["rtc_date"] = now.strftime("%-m/%-d/%Y")  # Match your format
+        latest_data["rtc_date"] = self.format_date_windows_compatible(now)  # Windows compatible
         latest_data["rtc_time"] = now.strftime("%H:%M:%S")
         
         # Temperature sensors with realistic correlations
