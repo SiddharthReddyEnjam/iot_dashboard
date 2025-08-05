@@ -11,6 +11,7 @@ from . import config
 
 try:
     import serial
+    import serial.tools.list_ports
 except ImportError:
     print("⚠️  pyserial not installed. Install with: pip install pyserial")
     serial = None
@@ -21,222 +22,268 @@ class DataReader:
         self.running = False
         self.serial_conn = None
         self.start_time = time.time()
+        self.data_buffer = ""
         
         # Initialize CSV with headers if file doesn't exist
         try:
             with open(config.CSV_FILE, 'x', newline='') as f:
                 writer = csv.writer(f)
-                writer.writerow(['timestamp', 'lat', 'lon', 'alt', 'satellites', 'utc_time', 
-                               'rtc_date', 'rtc_time', 'ms5611_temp', 'pressure', 'ds18b20_temp', 
-                               'scd30_temp', 'rh', 'co2', 'thermal_temp', 'heating_status', 'target_range'])
+                writer.writerow([
+                    'timestamp', 'lat_decimal', 'lon_decimal', 'lat_raw', 'lon_raw', 
+                    'alt', 'satellites', 'utc_time', 'rtc_date', 'rtc_time', 
+                    'ms5611_temp', 'pressure', 'ds18b20_temp', 'scd30_temp', 
+                    'rh', 'co2', 'thermal_temp', 'heating_status', 'target_range'
+                ])
         except FileExistsError:
             pass
         
         print(f"✅ DataReader initialized with socketio: {socketio}")
 
     def generate_realistic_mock_data(self):
-        """Generate realistic mock data with time-based variations"""
+        """Generate realistic mock data matching your device format"""
         current_time = time.time()
         elapsed = current_time - self.start_time
         
         # Time-based variations for realistic sensor behavior
-        time_factor = math.sin(elapsed / 60) * 0.5 + 0.5  # Slow sine wave over 1 minute
-        daily_factor = math.sin(elapsed / 3600) * 0.3 + 0.7  # Daily temperature variation
+        time_factor = math.sin(elapsed / 60) * 0.5 + 0.5  # Slow sine wave
+        daily_factor = math.sin(elapsed / 3600) * 0.3 + 0.7  # Daily variation
         
-        # GPS coordinates with slight drift (simulating movement)
-        # Convert to DDMM.MMMMM format like your device
-        base_lat_dd = 33.42119953  # 3325.271972 converted
-        base_lon_dd = -111.92072733  # 11155.243164 converted (assuming West)
+        # GPS coordinates in DDMM.MMMMM format (like your device)
+        base_lat = 3325.271972
+        base_lon = 11155.243164
         
-        # Convert back to DDMM.MMMMM format for display
-        lat_dd = base_lat_dd + (random.uniform(-0.001, 0.001) + math.sin(elapsed/30) * 0.0005)
-        lon_dd = abs(base_lon_dd) + (random.uniform(-0.001, 0.001) + math.cos(elapsed/30) * 0.0005)
-        
-        # Convert to DDMM.MMMMM format
-        lat_deg = int(lat_dd)
-        lat_min = (lat_dd - lat_deg) * 60
-        latest_data["lat"] = round(lat_deg * 100 + lat_min, 6)
-        
-        lon_deg = int(lon_dd)
-        lon_min = (lon_dd - lon_deg) * 60
-        latest_data["lon"] = round(lon_deg * 100 + lon_min, 6)
-        
-        # Other mock data
-        latest_data["alt"] = round(378 + math.sin(elapsed / 120) * 20 + random.uniform(-5, 5), 1)
+        latest_data["lat"] = base_lat + (random.uniform(-0.01, 0.01) + math.sin(elapsed/30) * 0.005)
+        latest_data["lon"] = base_lon + (random.uniform(-0.01, 0.01) + math.cos(elapsed/30) * 0.005)
+        latest_data["alt"] = round(378.0 + math.sin(elapsed / 120) * 30 + random.uniform(-10, 10), 1)
         latest_data["satellites"] = random.randint(7, 12)
         
         # Time data
         now = datetime.now()
         latest_data["utc_time"] = now.strftime("%H:%M:%S")
-        latest_data["rtc_date"] = now.strftime("%-m/%-d/%Y")
+        latest_data["rtc_date"] = now.strftime("%-m/%-d/%Y")  # Match your format
         latest_data["rtc_time"] = now.strftime("%H:%M:%S")
         
         # Temperature sensors with realistic correlations
-        base_temp = 25 + daily_factor * 3  # 22-28°C range
-        temp_noise = random.uniform(-0.5, 0.5)
+        base_temp = 25 + daily_factor * 5  # 20-30°C range
+        temp_noise = random.uniform(-0.3, 0.3)
         
         latest_data["ms5611_temp"] = round(base_temp + temp_noise + random.uniform(-1, 1), 2)
         latest_data["ds18b20_temp"] = round(base_temp + temp_noise + random.uniform(-0.8, 0.8), 2)
         latest_data["scd30_temp"] = round(base_temp + temp_noise + random.uniform(-0.6, 0.6), 2)
-        latest_data["thermal_temp"] = round(base_temp + temp_noise + random.uniform(-0.4, 0.4), 2)
+        latest_data["thermal_temp"] = round(26.04 + math.sin(elapsed / 200) * 2 + random.uniform(-0.5, 0.5), 2)
         
-        # Pressure
-        latest_data["pressure"] = round(970 + math.sin(elapsed / 300) * 5 + random.uniform(-2, 2), 2)
+        # Pressure with altitude correlation
+        latest_data["pressure"] = round(970.81 - (latest_data["alt"] - 378) * 0.12 + random.uniform(-2, 2), 2)
         
-        # Humidity with inverse correlation to temperature
-        base_humidity = 50 - (base_temp - 25) * 2
+        # Humidity with inverse temperature correlation
+        base_humidity = 50 - (base_temp - 25) * 1.5
         latest_data["rh"] = round(max(20, min(80, base_humidity + random.uniform(-5, 5))), 2)
         
-        # CO2 with realistic variations
-        co2_base = 700 + math.sin(elapsed / 600) * 100  # Slow variation
-        latest_data["co2"] = round(max(400, co2_base + random.uniform(-50, 50)), 1)
+        # CO2 with realistic atmospheric variations
+        co2_base = 700 + math.sin(elapsed / 600) * 150 + math.sin(elapsed / 60) * 20
+        latest_data["co2"] = round(max(400, min(1200, co2_base + random.uniform(-30, 30))), 1)
         
-        # Thermal system
-        latest_data["heating_status"] = "ON" if latest_data["thermal_temp"] < 29.5 else "OFF"
-        latest_data["target_range"] = "29.4 - 29.6"
+        # Thermal system logic
+        target_temp = (config.THERMAL_TARGET_MIN + config.THERMAL_TARGET_MAX) / 2
+        latest_data["heating_status"] = "ON" if latest_data["thermal_temp"] < target_temp else "OFF"
+        latest_data["target_range"] = f"{config.THERMAL_TARGET_MIN} - {config.THERMAL_TARGET_MAX}"
         
-        print(f"📊 Generated mock data: CO2={latest_data['co2']}, Temp={latest_data['ms5611_temp']}°C")
+        print(f"📊 Generated mock data: GPS={latest_data['lat']:.2f},{latest_data['lon']:.2f}, Alt={latest_data['alt']}m, CO2={latest_data['co2']}ppm")
 
-    def parse_serial_data(self, data_block):
-        """Parse the complete telemetry data block"""
+    def parse_telemetry_block(self, data_block):
+        """Parse a complete telemetry data block"""
         try:
             lines = data_block.strip().split('\n')
+            data_updated = False
             
             for line in lines:
                 line = line.strip()
+                if not line:
+                    continue
                 
-                # GPS data
+                # GPS coordinates and altitude
                 if line.startswith('GPS:'):
                     # GPS: 3325.271972, 11155.243164 (Alt: 378.0 m)
-                    gps_match = re.search(r'GPS:\s*([\d.]+),\s*([\d.]+)\s*\(Alt:\s*([\d.]+)\s*m\)', line)
-                    if gps_match:
-                        latest_data["lat"] = float(gps_match.group(1))
-                        latest_data["lon"] = float(gps_match.group(2))
-                        latest_data["alt"] = float(gps_match.group(3))
+                    gps_pattern = r'GPS:\s*([\d.]+),\s*([\d.]+)\s*\(Alt:\s*([\d.]+)\s*m\)'
+                    match = re.search(gps_pattern, line)
+                    if match:
+                        latest_data["lat"] = float(match.group(1))
+                        latest_data["lon"] = float(match.group(2))
+                        latest_data["alt"] = float(match.group(3))
+                        data_updated = True
                 
                 # Satellites
                 elif line.startswith('Sats:'):
-                    sat_match = re.search(r'Sats:\s*(\d+)', line)
-                    if sat_match:
-                        latest_data["satellites"] = int(sat_match.group(1))
+                    match = re.search(r'Sats:\s*(\d+)', line)
+                    if match:
+                        latest_data["satellites"] = int(match.group(1))
+                        data_updated = True
                 
                 # UTC Time
                 elif line.startswith('UTC Time:'):
-                    time_match = re.search(r'UTC Time:\s*([\d:]+)', line)
-                    if time_match:
-                        latest_data["utc_time"] = time_match.group(1)
+                    match = re.search(r'UTC Time:\s*([\d:]+)', line)
+                    if match:
+                        latest_data["utc_time"] = match.group(1)
+                        data_updated = True
                 
                 # RTC Date
                 elif line.startswith('RTC Date:'):
-                    date_match = re.search(r'RTC Date:\s*([\d/]+)', line)
-                    if date_match:
-                        latest_data["rtc_date"] = date_match.group(1)
+                    match = re.search(r'RTC Date:\s*([\d/]+)', line)
+                    if match:
+                        latest_data["rtc_date"] = match.group(1)
+                        data_updated = True
                 
                 # RTC Time
                 elif line.startswith('RTC Time:'):
-                    time_match = re.search(r'RTC Time:\s*([\d:]+)', line)
-                    if time_match:
-                        latest_data["rtc_time"] = time_match.group(1)
+                    match = re.search(r'RTC Time:\s*([\d:]+)', line)
+                    if match:
+                        latest_data["rtc_time"] = match.group(1)
+                        data_updated = True
                 
                 # MS5611 Temperature
                 elif line.startswith('MS5611 Temp:'):
-                    temp_match = re.search(r'MS5611 Temp:\s*([\d.]+)', line)
-                    if temp_match:
-                        latest_data["ms5611_temp"] = float(temp_match.group(1))
+                    match = re.search(r'MS5611 Temp:\s*([\d.-]+)', line)
+                    if match:
+                        latest_data["ms5611_temp"] = float(match.group(1))
+                        data_updated = True
                 
                 # Pressure
                 elif line.startswith('Pressure:'):
-                    pressure_match = re.search(r'Pressure:\s*([\d.]+)', line)
-                    if pressure_match:
-                        latest_data["pressure"] = float(pressure_match.group(1))
+                    match = re.search(r'Pressure:\s*([\d.-]+)', line)
+                    if match:
+                        latest_data["pressure"] = float(match.group(1))
+                        data_updated = True
                 
                 # DS18B20 Temperature
                 elif line.startswith('DS18B20 Temp:'):
-                    temp_match = re.search(r'DS18B20 Temp:\s*([\d.]+)', line)
-                    if temp_match:
-                        latest_data["ds18b20_temp"] = float(temp_match.group(1))
+                    # DS18B20 Temp: 25.62 °C (78.12 °F)
+                    match = re.search(r'DS18B20 Temp:\s*([\d.-]+)', line)
+                    if match:
+                        latest_data["ds18b20_temp"] = float(match.group(1))
+                        data_updated = True
                 
                 # SCD30 Temperature
                 elif line.startswith('SCD30 Temp:'):
-                    temp_match = re.search(r'SCD30 Temp:\s*([\d.]+)', line)
-                    if temp_match:
-                        latest_data["scd30_temp"] = float(temp_match.group(1))
+                    match = re.search(r'SCD30 Temp:\s*([\d.-]+)', line)
+                    if match:
+                        latest_data["scd30_temp"] = float(match.group(1))
+                        data_updated = True
                 
                 # Humidity
                 elif line.startswith('Humidity:'):
-                    humidity_match = re.search(r'Humidity:\s*([\d.]+)', line)
-                    if humidity_match:
-                        latest_data["rh"] = float(humidity_match.group(1))
+                    match = re.search(r'Humidity:\s*([\d.-]+)', line)
+                    if match:
+                        latest_data["rh"] = float(match.group(1))
+                        data_updated = True
                 
                 # CO2
                 elif line.startswith('CO2:'):
-                    co2_match = re.search(r'CO2:\s*([\d.]+)', line)
-                    if co2_match:
-                        latest_data["co2"] = float(co2_match.group(1))
+                    match = re.search(r'CO2:\s*([\d.-]+)', line)
+                    if match:
+                        latest_data["co2"] = float(match.group(1))
+                        data_updated = True
                 
                 # Thermal Temperature
                 elif line.startswith('Thermal Temp:'):
-                    temp_match = re.search(r'Thermal Temp:\s*([\d.]+)', line)
-                    if temp_match:
-                        latest_data["thermal_temp"] = float(temp_match.group(1))
+                    # Thermal Temp: 26.04 °C (78.87 °F)
+                    match = re.search(r'Thermal Temp:\s*([\d.-]+)', line)
+                    if match:
+                        latest_data["thermal_temp"] = float(match.group(1))
+                        data_updated = True
                 
                 # Heating Status
                 elif line.startswith('Heating Status:'):
-                    status_match = re.search(r'Heating Status:\s*(\w+)', line)
-                    if status_match:
-                        latest_data["heating_status"] = status_match.group(1)
+                    match = re.search(r'Heating Status:\s*(\w+)', line)
+                    if match:
+                        latest_data["heating_status"] = match.group(1)
+                        data_updated = True
                 
                 # Target Range
                 elif line.startswith('Target Range:'):
-                    range_match = re.search(r'Target Range:\s*([\d.]+ - [\d.]+)', line)
-                    if range_match:
-                        latest_data["target_range"] = range_match.group(1)
+                    match = re.search(r'Target Range:\s*([\d.]+ - [\d.]+)', line)
+                    if match:
+                        latest_data["target_range"] = match.group(1)
+                        data_updated = True
             
-            print(f"📡 Parsed serial data: GPS={latest_data.get('lat', 'N/A')}, CO2={latest_data.get('co2', 'N/A')}")
-            return True
+            if data_updated:
+                print(f"📡 Parsed telemetry: GPS=({latest_data.get('lat', 'N/A')}, {latest_data.get('lon', 'N/A')}), Alt={latest_data.get('alt', 'N/A')}m, CO2={latest_data.get('co2', 'N/A')}ppm")
+            
+            return data_updated
                     
         except Exception as e:
-            print(f"❌ Error parsing serial data: {e}")
+            print(f"❌ Error parsing telemetry data: {e}")
             return False
 
     def read_serial_data(self):
-        """Read data from serial device"""
+        """Read data from serial device with improved buffering"""
         try:
             if not self.serial_conn:
                 if not serial:
                     print("❌ pyserial not available")
                     return False
                     
+                print(f"📡 Attempting to connect to {config.SERIAL_PORT} at {config.BAUD_RATE} baud...")
                 self.serial_conn = serial.Serial(
                     config.SERIAL_PORT, 
                     config.BAUD_RATE, 
                     timeout=config.TIMEOUT
                 )
-                print(f"📡 Connected to {config.SERIAL_PORT}")
+                time.sleep(2)  # Give device time to initialize
+                print(f"✅ Connected to {config.SERIAL_PORT}")
             
-            # Read multiple lines to get complete data block
-            data_block = ""
+            # Read data with buffering
             start_time = time.time()
+            new_data = ""
             
-            while time.time() - start_time < 2:  # Read for up to 2 seconds
+            while time.time() - start_time < 5:  # Read for up to 5 seconds
                 if self.serial_conn.in_waiting > 0:
-                    line = self.serial_conn.readline().decode('utf-8', errors='ignore').strip()
-                    if line:
-                        data_block += line + '\n'
-                        # Check if we have a complete block
-                        if 'Target Range:' in line:  # End of block marker
-                            break
+                    try:
+                        chunk = self.serial_conn.read(self.serial_conn.in_waiting).decode('utf-8', errors='ignore')
+                        new_data += chunk
+                        self.data_buffer += chunk
+                        
+                        # Look for complete telemetry blocks
+                        if "=== COMBINED TELEMETRY ===" in self.data_buffer and "Target Range:" in self.data_buffer:
+                            # Extract the complete block
+                            start_marker = "=== COMBINED TELEMETRY ==="
+                            start_idx = self.data_buffer.find(start_marker)
+                            
+                            if start_idx != -1:
+                                block_start = start_idx + len(start_marker)
+                                # Look for the end of this block (next start marker or end of buffer)
+                                next_start = self.data_buffer.find(start_marker, block_start)
+                                
+                                if next_start != -1:
+                                    block = self.data_buffer[block_start:next_start]
+                                    self.data_buffer = self.data_buffer[next_start:]  # Keep remaining data
+                                else:
+                                    block = self.data_buffer[block_start:]
+                                    self.data_buffer = ""
+                                
+                                # Parse the complete block
+                                if block.strip():
+                                    return self.parse_telemetry_block(block)
+                        
+                        # Prevent buffer from getting too large
+                        if len(self.data_buffer) > 2000:
+                            self.data_buffer = self.data_buffer[-1000:]  # Keep last 1000 chars
+                            
+                    except UnicodeDecodeError:
+                        print("⚠️ Unicode decode error, skipping chunk")
+                        continue
+                        
                 else:
                     time.sleep(0.1)
             
-            if data_block:
-                return self.parse_serial_data(data_block)
             return False
             
         except serial.SerialException as e:
             print(f"❌ Serial error: {e}")
             if self.serial_conn:
-                self.serial_conn.close()
+                try:
+                    self.serial_conn.close()
+                except:
+                    pass
                 self.serial_conn = None
             update_system_status("device", error=True)
             return False
@@ -244,13 +291,28 @@ class DataReader:
             print(f"❌ Unexpected error in serial reading: {e}")
             return False
 
+    def convert_gps_to_decimal(self, coord):
+        """Convert DDMM.MMMMM format to decimal degrees"""
+        if coord == 0:
+            return 0
+        
+        degrees = int(coord / 100)
+        minutes = coord - (degrees * 100)
+        return degrees + (minutes / 60)
+
     def log_data_to_csv(self, timestamp):
-        """Log current data to CSV file"""
+        """Log current data to CSV file with decimal GPS coordinates"""
         try:
+            # Convert GPS to decimal
+            lat_decimal = self.convert_gps_to_decimal(latest_data.get("lat", 0))
+            lon_decimal = -self.convert_gps_to_decimal(latest_data.get("lon", 0))  # Assuming West longitude
+            
             with open(config.CSV_FILE, "a", newline="") as f:
                 writer = csv.writer(f)
                 writer.writerow([
                     timestamp,
+                    lat_decimal,
+                    lon_decimal,
                     latest_data.get("lat", ""),
                     latest_data.get("lon", ""),
                     latest_data.get("alt", ""),
@@ -281,13 +343,19 @@ class DataReader:
     def emit_data(self, timestamp):
         """Emit data via WebSocket"""
         try:
+            # Add decimal GPS coordinates for frontend
+            lat_decimal = self.convert_gps_to_decimal(latest_data.get("lat", 0))
+            lon_decimal = -self.convert_gps_to_decimal(latest_data.get("lon", 0))  # West longitude
+            
             data_to_send = {
                 **latest_data, 
+                "lat_decimal": lat_decimal,
+                "lon_decimal": lon_decimal,
                 "timestamp": timestamp, 
                 "source": "mock" if config.USE_MOCK else "device"
             }
             
-            print(f"🚀 Emitting data via WebSocket: CO2={data_to_send.get('co2', 'N/A')}")
+            print(f"🚀 Emitting data: GPS=({lat_decimal:.4f}, {lon_decimal:.4f}), Alt={data_to_send.get('alt', 'N/A')}m, CO2={data_to_send.get('co2', 'N/A')}ppm")
             self.socketio.emit("new_data", data_to_send)
             print(f"✅ Data emitted successfully")
             
@@ -299,9 +367,12 @@ class DataReader:
     def run_reader(self):
         """Main reader loop"""
         print(f"🚀 Starting data reader - Mode: {'Mock' if config.USE_MOCK else 'Serial Device'}")
+        print(f"📡 Port: {config.SERIAL_PORT} | Baud: {config.BAUD_RATE} | Timeout: {config.TIMEOUT}s")
         print(f"⏰ Update interval: {config.MOCK_UPDATE_INTERVAL} seconds")
         
         iteration_count = 0
+        consecutive_failures = 0
+        max_failures = 5
         
         while self.running:
             try:
@@ -309,13 +380,27 @@ class DataReader:
                 data_updated = False
                 iteration_count += 1
                 
-                print(f"🔄 Reader iteration #{iteration_count}")
+                print(f"🔄 Reader iteration #{iteration_count} ({'Mock' if config.USE_MOCK else 'Device'})")
                 
                 if config.USE_MOCK:
                     self.generate_realistic_mock_data()
                     data_updated = True
+                    consecutive_failures = 0
                 else:
                     data_updated = self.read_serial_data()
+                    
+                    if data_updated:
+                        consecutive_failures = 0
+                    else:
+                        consecutive_failures += 1
+                        print(f"⚠️ No data received (failure #{consecutive_failures}/{max_failures})")
+                        
+                        if consecutive_failures >= max_failures:
+                            print(f"❌ Too many failures, switching to mock mode temporarily")
+                            # Don't actually switch config.USE_MOCK, just generate mock data for this iteration
+                            self.generate_realistic_mock_data()
+                            data_updated = True
+                            consecutive_failures = 0
                 
                 if data_updated:
                     print(f"📈 Data updated, logging and emitting...")
@@ -324,15 +409,23 @@ class DataReader:
                     self.emit_data(timestamp)
                     update_system_status("mock" if config.USE_MOCK else "device")
                 else:
-                    print(f"⚠️  No data update in iteration #{iteration_count}")
+                    print(f"⚠️ No data update in iteration #{iteration_count}")
                 
                 time.sleep(config.MOCK_UPDATE_INTERVAL)
                 
+            except KeyboardInterrupt:
+                print("🛑 Reader stopped by user")
+                break
             except Exception as e:
                 print(f"❌ Error in reader loop: {e}")
                 import traceback
                 traceback.print_exc()
+                consecutive_failures += 1
                 time.sleep(1)  # Brief pause on error
+                
+                if consecutive_failures >= max_failures:
+                    print("❌ Too many errors, stopping reader")
+                    break
 
     def start(self):
         """Start the reader thread"""
@@ -348,8 +441,12 @@ class DataReader:
         print(f"🛑 Stopping DataReader...")
         self.running = False
         if self.serial_conn:
-            self.serial_conn.close()
-            print("📡 Serial connection closed")
+            try:
+                self.serial_conn.close()
+                print("📡 Serial connection closed")
+            except:
+                pass
+            self.serial_conn = None
 
 # Global reader instance
 reader_instance = None
@@ -360,13 +457,14 @@ def start_reader(socketio):
     print(f"🚀 start_reader called with socketio: {socketio}")
     
     if reader_instance is not None:
-        print("⚠️  DataReader already exists, stopping previous instance")
+        print("⚠️ DataReader already exists, stopping previous instance")
         reader_instance.stop()
+        time.sleep(1)  # Give it time to stop
     
     reader_instance = DataReader(socketio)
     thread = reader_instance.start()
     
-    # Give it a moment to start, then test
+    # Give it a moment to start
     time.sleep(0.5)
     
     return thread
@@ -377,3 +475,38 @@ def stop_reader():
     if reader_instance:
         reader_instance.stop()
         reader_instance = None
+
+def get_available_ports():
+    """Get list of available serial ports"""
+    if not serial:
+        return []
+    
+    try:
+        ports = []
+        for port_info in serial.tools.list_ports.comports():
+            ports.append({
+                "device": port_info.device,
+                "description": port_info.description,
+                "hwid": port_info.hwid
+            })
+        return ports
+    except Exception as e:
+        print(f"Error getting available ports: {e}")
+        return []
+
+def test_serial_connection(port=None, baud_rate=None):
+    """Test serial connection with specified or default settings"""
+    if not serial:
+        return False, "pyserial not installed"
+    
+    test_port = port or config.SERIAL_PORT
+    test_baud = baud_rate or config.BAUD_RATE
+    
+    try:
+        test_conn = serial.Serial(test_port, test_baud, timeout=1)
+        test_conn.close()
+        return True, f"Successfully connected to {test_port} at {test_baud} baud"
+    except serial.SerialException as e:
+        return False, f"Failed to connect to {test_port}: {str(e)}"
+    except Exception as e:
+        return False, f"Unexpected error: {str(e)}"
