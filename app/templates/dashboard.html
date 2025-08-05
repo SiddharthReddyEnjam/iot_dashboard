@@ -4,8 +4,19 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>IoT Real-Time Dashboard</title>
+    <!-- Custom favicon -->
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHZpZXdCb3g9IjAgMCAzMiAzMiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGNpcmNsZSBjeD0iMTYiIGN5PSIxNiIgcj0iMTYiIGZpbGw9IiM2NjdlZWEiLz4KPHN2ZyB4PSI2IiB5PSI2IiB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0id2hpdGUiPgo8cGF0aCBkPSJNMTIgMmwtMy4wOSAzLjI2TDIgOWw0LjUgMTEuNUw5IDIyLjVIMTVsMS41LTJMMjEgOWwtNi45MS0zLjc0TDEyIDJ6IiBzdHJva2U9IndoaXRlIiBzdHJva2Utd2lkdGg9IjEuNSIgZmlsbD0ibm9uZSIvPgo8Y2lyY2xlIGN4PSIxMiIgY3k9IjEwIiByPSIyIiBmaWxsPSJ3aGl0ZSIvPgo8L3N2Zz4KPC9zdmc+"
+    />
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    />
     <link
       href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"
       rel="stylesheet"
@@ -359,6 +370,34 @@
         background: #4caf50;
       }
 
+      .axis-controls {
+        display: flex;
+        justify-content: center;
+        gap: 8px;
+        margin-bottom: 10px;
+        flex-wrap: wrap;
+      }
+
+      .axis-btn {
+        padding: 4px 8px;
+        border: 1px solid #667eea;
+        border-radius: 12px;
+        background: white;
+        color: #667eea;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        font-size: 0.75em;
+      }
+
+      .axis-btn:hover {
+        background: #f0f2ff;
+      }
+
+      .axis-btn.active {
+        background: #667eea;
+        color: white;
+      }
+
       .chart-container {
         height: 300px;
         position: relative;
@@ -373,14 +412,16 @@
         height: 400px;
         background: rgba(255, 255, 255, 0.95);
         border-radius: 15px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        color: #666;
-        font-style: italic;
         box-shadow: 0 8px 32px rgba(31, 38, 135, 0.37);
         backdrop-filter: blur(4px);
         border: 1px solid rgba(255, 255, 255, 0.18);
+        overflow: hidden;
+      }
+
+      #map {
+        height: 100%;
+        width: 100%;
+        border-radius: 15px;
       }
 
       .timestamp {
@@ -431,12 +472,29 @@
       .temp-hot {
         color: #ff6b6b;
       }
+
+      /* Custom balloon icon */
+      .balloon-icon {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        border-radius: 50%;
+        width: 24px;
+        height: 24px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-size: 12px;
+        margin-right: 8px;
+      }
     </style>
   </head>
   <body>
     <div class="container">
       <div class="header">
-        <h1><i class="fas fa-satellite-dish"></i> IoT Real-Time Dashboard</h1>
+        <h1>
+          <div class="balloon-icon">🎈</div>
+          IoT Real-Time Dashboard
+        </h1>
         <p>
           High Altitude Weather Balloon - Environmental Monitoring & GPS
           Tracking
@@ -640,6 +698,22 @@
             </button>
           </div>
 
+          <div class="axis-controls">
+            <span style="font-size: 0.8em; color: #666; margin-right: 8px"
+              >X-Axis:</span
+            >
+            <button class="axis-btn active" onclick="setXAxis('time')">
+              Time
+            </button>
+            <button
+              class="axis-btn"
+              onclick="setXAxis('altitude')"
+              id="altitudeAxisBtn"
+            >
+              Altitude
+            </button>
+          </div>
+
           <div class="chart-container">
             <canvas id="dataChart"></canvas>
           </div>
@@ -653,18 +727,8 @@
             <i class="fas fa-globe"></i>
             <h3>GPS Tracking Map</h3>
           </div>
-          <div class="map-container" id="mapContainer">
-            <div>
-              <i
-                class="fas fa-map"
-                style="font-size: 3em; margin-bottom: 20px; color: #ccc"
-              ></i>
-              <p>Interactive map will be displayed here</p>
-              <p>
-                Current Position:
-                <span id="currentPosition">Waiting for GPS...</span>
-              </p>
-            </div>
+          <div class="map-container">
+            <div id="map"></div>
           </div>
         </div>
       </div>
@@ -677,13 +741,20 @@
     <script>
       // Global variables
       let currentChart = 'co2';
+      let currentXAxis = 'time';
+      let map;
+      let balloonMarker;
+      let pathPolyline;
+      let pathCoordinates = [];
+
       let chartData = {
         labels: [],
+        time: [],
+        altitude: [],
         co2: [],
         temperature: [],
         humidity: [],
         pressure: [],
-        altitude: [],
       };
 
       // Current configuration
@@ -692,6 +763,78 @@
         baudRate: 9600,
         useMock: true,
       };
+
+      // Initialize map
+      function initializeMap() {
+        // Initialize map centered on default coordinates
+        map = L.map('map').setView([33.421, -111.921], 13);
+
+        // Add OpenStreetMap tiles
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          attribution: '© OpenStreetMap contributors',
+        }).addTo(map);
+
+        // Create custom balloon icon
+        const balloonIcon = L.divIcon({
+          html: '<div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 50%; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; color: white; font-size: 12px; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">🎈</div>',
+          className: 'custom-div-icon',
+          iconSize: [24, 24],
+          iconAnchor: [12, 12],
+        });
+
+        // Add marker for balloon position
+        balloonMarker = L.marker([33.421, -111.921], {
+          icon: balloonIcon,
+        }).addTo(map);
+        balloonMarker.bindPopup('Weather Balloon<br>Waiting for GPS data...');
+
+        // Initialize path polyline
+        pathPolyline = L.polyline([], {
+          color: '#667eea',
+          weight: 3,
+          opacity: 0.8,
+          dashArray: '5, 5',
+        }).addTo(map);
+      }
+
+      function updateMap(data) {
+        if (!map || !data.lat_decimal || !data.lon_decimal) return;
+
+        const lat = data.lat_decimal;
+        const lon = data.lon_decimal;
+        const alt = data.alt || 0;
+
+        // Update marker position
+        balloonMarker.setLatLng([lat, lon]);
+        balloonMarker.setPopupContent(`
+          <strong>Weather Balloon</strong><br>
+          Lat: ${lat.toFixed(6)}°<br>
+          Lon: ${lon.toFixed(6)}°<br>
+          Alt: ${alt.toFixed(1)}m<br>
+          Satellites: ${data.satellites || 'N/A'}<br>
+          UTC: ${data.utc_time || 'N/A'}
+        `);
+
+        // Add to path
+        pathCoordinates.push([lat, lon]);
+
+        // Keep only last 100 points for performance
+        if (pathCoordinates.length > 100) {
+          pathCoordinates.shift();
+        }
+
+        // Update path
+        pathPolyline.setLatLngs(pathCoordinates);
+
+        // Center map on balloon (only if it's moved significantly)
+        const currentCenter = map.getCenter();
+        const distance = map.distance(currentCenter, [lat, lon]);
+
+        if (distance > 1000) {
+          // Only recenter if balloon moved more than 1km
+          map.setView([lat, lon], map.getZoom());
+        }
+      }
 
       // Chart setup
       const ctx = document.getElementById('dataChart').getContext('2d');
@@ -723,6 +866,10 @@
           scales: {
             x: {
               display: true,
+              title: {
+                display: true,
+                text: 'Time',
+              },
               grid: { color: 'rgba(0,0,0,0.1)' },
             },
             y: {
@@ -745,6 +892,8 @@
           timestamp: now.getTime() / 1000,
           lat: 3325.271972 + (Math.random() - 0.5) * 0.01,
           lon: 11155.243164 + (Math.random() - 0.5) * 0.01,
+          lat_decimal: 33.421 + (Math.random() - 0.5) * 0.01,
+          lon_decimal: -111.921 + (Math.random() - 0.5) * 0.01,
           alt: 378.0 + (Math.random() - 0.5) * 50,
           satellites: Math.floor(Math.random() * 5) + 7,
           utc_time: time,
@@ -764,6 +913,7 @@
 
         updateDisplay(mockData);
         updateChart(mockData);
+        updateMap(mockData);
 
         document.getElementById('timestamp').textContent = now.toLocaleString();
         document.getElementById('lastUpdate').textContent = time;
@@ -778,71 +928,95 @@
       }
 
       function updateDisplay(data) {
-        // Convert GPS coordinates
-        const latDecimal = convertGpsToDecimal(data.lat);
-        const lonDecimal = -convertGpsToDecimal(data.lon); // West longitude
+        // Convert GPS coordinates if needed
+        let latDecimal = data.lat_decimal;
+        let lonDecimal = data.lon_decimal;
+
+        if (!latDecimal && data.lat) {
+          latDecimal = convertGpsToDecimal(data.lat);
+        }
+        if (!lonDecimal && data.lon) {
+          lonDecimal = -convertGpsToDecimal(data.lon); // West longitude
+        }
 
         // Update GPS tracking
-        document.getElementById('latitude').textContent = latDecimal.toFixed(6);
-        document.getElementById('longitude').textContent =
-          lonDecimal.toFixed(6);
-        document.getElementById('altitude').textContent = data.alt.toFixed(1);
-        document.getElementById('satellites').textContent = data.satellites;
-        document.getElementById('utcTime').textContent = data.utc_time;
+        document.getElementById('latitude').textContent = latDecimal
+          ? latDecimal.toFixed(6)
+          : '--';
+        document.getElementById('longitude').textContent = lonDecimal
+          ? lonDecimal.toFixed(6)
+          : '--';
+        document.getElementById('altitude').textContent = data.alt
+          ? data.alt.toFixed(1)
+          : '--';
+        document.getElementById('satellites').textContent =
+          data.satellites || '--';
+        document.getElementById('utcTime').textContent =
+          data.utc_time || '--:--:--';
 
         // Update payload internal
-        document.getElementById('rtcDate').textContent = data.rtc_date;
-        document.getElementById('rtcTime').textContent = data.rtc_time;
-        document.getElementById('thermalTemp').textContent =
-          data.thermal_temp.toFixed(2);
-        document.getElementById('targetRange').textContent = data.target_range;
+        document.getElementById('rtcDate').textContent =
+          data.rtc_date || '--/--/----';
+        document.getElementById('rtcTime').textContent =
+          data.rtc_time || '--:--:--';
+        document.getElementById('thermalTemp').textContent = data.thermal_temp
+          ? data.thermal_temp.toFixed(2)
+          : '--';
+        document.getElementById('targetRange').textContent =
+          data.target_range || '--';
 
         const heatingStatus = document.getElementById('heatingStatus');
-        heatingStatus.textContent = data.heating_status;
+        heatingStatus.textContent = data.heating_status || 'OFF';
         heatingStatus.className =
           'heating-status ' +
           (data.heating_status === 'ON' ? 'heating-on' : 'heating-off');
 
         // Update environmental sensors
-        document.getElementById('co2').textContent = data.co2.toFixed(1);
-        document.getElementById('scd30Temp').textContent =
-          data.scd30_temp.toFixed(2);
-        document.getElementById('humidity').textContent = data.rh.toFixed(1);
-        document.getElementById('ds18b20Temp').textContent =
-          data.ds18b20_temp.toFixed(2);
-        document.getElementById('ms5611Temp').textContent =
-          data.ms5611_temp.toFixed(2);
-        document.getElementById('pressure').textContent =
-          data.pressure.toFixed(2);
-
-        // Update map position
-        document.getElementById(
-          'currentPosition'
-        ).textContent = `${latDecimal.toFixed(4)}°, ${lonDecimal.toFixed(
-          4
-        )}° @ ${data.alt.toFixed(0)}m`;
+        document.getElementById('co2').textContent = data.co2
+          ? data.co2.toFixed(1)
+          : '--';
+        document.getElementById('scd30Temp').textContent = data.scd30_temp
+          ? data.scd30_temp.toFixed(2)
+          : '--';
+        document.getElementById('humidity').textContent = data.rh
+          ? data.rh.toFixed(1)
+          : '--';
+        document.getElementById('ds18b20Temp').textContent = data.ds18b20_temp
+          ? data.ds18b20_temp.toFixed(2)
+          : '--';
+        document.getElementById('ms5611Temp').textContent = data.ms5611_temp
+          ? data.ms5611_temp.toFixed(2)
+          : '--';
+        document.getElementById('pressure').textContent = data.pressure
+          ? data.pressure.toFixed(2)
+          : '--';
       }
 
       function updateChart(data) {
         const time = new Date(data.timestamp * 1000).toLocaleTimeString();
 
         chartData.labels.push(time);
-        chartData.co2.push(data.co2);
+        chartData.time.push(data.timestamp);
+        chartData.altitude.push(data.alt || 0);
+        chartData.co2.push(data.co2 || 0);
         chartData.temperature.push(
-          (data.ms5611_temp + data.ds18b20_temp + data.scd30_temp) / 3
+          ((data.ms5611_temp || 0) +
+            (data.ds18b20_temp || 0) +
+            (data.scd30_temp || 0)) /
+            3
         );
-        chartData.humidity.push(data.rh);
-        chartData.pressure.push(data.pressure);
-        chartData.altitude.push(data.alt);
+        chartData.humidity.push(data.rh || 0);
+        chartData.pressure.push(data.pressure || 0);
 
         // Keep only last 50 points
         if (chartData.labels.length > 50) {
           chartData.labels.shift();
+          chartData.time.shift();
+          chartData.altitude.shift();
           chartData.co2.shift();
           chartData.temperature.shift();
           chartData.humidity.shift();
           chartData.pressure.shift();
-          chartData.altitude.shift();
         }
 
         updateChartDisplay();
@@ -855,13 +1029,51 @@
         document
           .querySelectorAll('.chart-btn')
           .forEach((btn) => btn.classList.remove('active'));
-        event.target.classList.add('active');
+        document
+          .querySelector(`[onclick="showChart('${type}')"]`)
+          .classList.add('active');
+
+        // Disable altitude axis for altitude chart
+        const altAxisBtn = document.getElementById('altitudeAxisBtn');
+        if (type === 'altitude') {
+          altAxisBtn.disabled = true;
+          altAxisBtn.style.opacity = '0.5';
+          altAxisBtn.style.cursor = 'not-allowed';
+          if (currentXAxis === 'altitude') {
+            setXAxis('time');
+          }
+        } else {
+          altAxisBtn.disabled = false;
+          altAxisBtn.style.opacity = '1';
+          altAxisBtn.style.cursor = 'pointer';
+        }
+
+        updateChartDisplay();
+      }
+
+      function setXAxis(axis) {
+        if (currentChart === 'altitude' && axis === 'altitude') {
+          return; // Don't allow altitude vs altitude
+        }
+
+        currentXAxis = axis;
+
+        // Update button states
+        document
+          .querySelectorAll('.axis-btn')
+          .forEach((btn) => btn.classList.remove('active'));
+        document
+          .querySelector(`[onclick="setXAxis('${axis}')"]`)
+          .classList.add('active');
 
         updateChartDisplay();
       }
 
       function updateChartDisplay() {
         let dataset = chart.data.datasets[0];
+        let xAxisData =
+          currentXAxis === 'time' ? chartData.labels : chartData.altitude;
+        let xAxisTitle = currentXAxis === 'time' ? 'Time' : 'Altitude (m)';
 
         switch (currentChart) {
           case 'co2':
@@ -896,7 +1108,10 @@
             break;
         }
 
-        chart.data.labels = [...chartData.labels];
+        // Update X-axis data and title
+        chart.data.labels = [...xAxisData];
+        chart.options.scales.x.title.text = xAxisTitle;
+
         chart.update('none');
       }
 
@@ -973,8 +1188,8 @@
 
         for (let i = 0; i < chartData.labels.length; i++) {
           // This is simplified - in a real implementation, you'd store all the raw data
-          csv += `${chartData.labels[i]},`;
-          csv += `${chartData.temperature[i] || ''},`; // Simplified
+          csv += `${chartData.time[i] || ''},`;
+          csv += `${chartData.temperature[i] || ''},`;
           csv += `${chartData.altitude[i] || ''},`;
           csv += `${chartData.humidity[i] || ''},`;
           csv += `${chartData.co2[i] || ''},`;
@@ -996,6 +1211,9 @@
       // Initialize the dashboard
       function initializeDashboard() {
         console.log('Initializing dashboard...');
+
+        // Initialize map
+        initializeMap();
 
         // Set initial status
         document.getElementById('connectionStatus').style.background =
@@ -1033,6 +1251,7 @@
       socket.on('new_data', function (data) {
         updateDisplay(data);
         updateChart(data);
+        updateMap(data);
 
         const now = new Date(data.timestamp * 1000);
         document.getElementById('timestamp').textContent = now.toLocaleString();
