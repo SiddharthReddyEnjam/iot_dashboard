@@ -30,7 +30,7 @@ class DataReader:
                 writer = csv.writer(f)
                 writer.writerow([
                     'timestamp', 'lat_decimal', 'lon_decimal', 'lat_raw', 'lon_raw', 
-                    'alt', 'satellites', 'utc_time', 'rtc_date', 'rtc_time', 
+                    'alt', 'alt_calculated', 'satellites', 'utc_time', 'rtc_date', 'rtc_time', 
                     'ms5611_temp', 'pressure', 'ds18b20_temp', 'scd30_temp', 
                     'rh', 'co2', 'thermal_temp', 'heating_status', 'target_range'
                 ])
@@ -38,6 +38,32 @@ class DataReader:
             pass
         
         print(f"✅ DataReader initialized with socketio: {socketio}")
+
+    def calculate_altitude_from_pressure(self, pressure_mb, temperature_c, sea_level_pressure=1013.25):
+        """
+        Calculate altitude from pressure using the barometric formula
+        
+        Args:
+            pressure_mb: Current pressure in millibars (mbar)
+            temperature_c: Current temperature in Celsius
+            sea_level_pressure: Sea level pressure in mbar (default: 1013.25)
+        
+        Returns:
+            Altitude in meters
+        """
+        try:
+            # Convert temperature to Kelvin
+            T_kelvin = temperature_c + 273.15
+            
+            # Barometric formula: h = ((P0/P)^(1/5.257) - 1) * (T + 273.15) / 0.0065
+            pressure_ratio = sea_level_pressure / pressure_mb
+            altitude = ((pressure_ratio ** (1/5.257)) - 1) * T_kelvin / 0.0065
+            
+            return round(altitude, 1)
+            
+        except Exception as e:
+            print(f"❌ Error calculating altitude: {e}")
+            return 0.0
 
     def format_date_windows_compatible(self, dt):
         """Format date in M/D/YYYY format (Windows compatible)"""
@@ -59,20 +85,10 @@ class DataReader:
         time_factor = math.sin(elapsed / 60) * 0.5 + 0.5  # Slow sine wave
         daily_factor = math.sin(elapsed / 3600) * 0.3 + 0.7  # Daily variation
         
-        # GPS coordinates in DDMM.MMMMM format (like your device)
-        base_lat = 3325.271972
-        base_lon = 11155.243164
-        
-        latest_data["lat"] = base_lat + (random.uniform(-0.01, 0.01) + math.sin(elapsed/30) * 0.005)
-        latest_data["lon"] = base_lon + (random.uniform(-0.01, 0.01) + math.cos(elapsed/30) * 0.005)
-        latest_data["alt"] = round(378.0 + math.sin(elapsed / 120) * 30 + random.uniform(-10, 10), 1)
-        latest_data["satellites"] = random.randint(7, 12)
-        
-        # Time data - Windows compatible formatting
-        now = datetime.now()
-        latest_data["utc_time"] = now.strftime("%H:%M:%S")
-        latest_data["rtc_date"] = self.format_date_windows_compatible(now)  # Windows compatible
-        latest_data["rtc_time"] = now.strftime("%H:%M:%S")
+        # GPS coordinates in DDMM.MMMMM format (like your device) - set to 0 when no GPS
+        latest_data["lat"] = 0.0  # No GPS fix
+        latest_data["lon"] = 0.0  # No GPS fix
+        latest_data["satellites"] = 0  # No satellites when no GPS
         
         # Temperature sensors with realistic correlations
         base_temp = 25 + daily_factor * 5  # 20-30°C range
@@ -83,8 +99,23 @@ class DataReader:
         latest_data["scd30_temp"] = round(base_temp + temp_noise + random.uniform(-0.6, 0.6), 2)
         latest_data["thermal_temp"] = round(26.04 + math.sin(elapsed / 200) * 2 + random.uniform(-0.5, 0.5), 2)
         
-        # Pressure with altitude correlation
-        latest_data["pressure"] = round(970.81 - (latest_data["alt"] - 378) * 0.12 + random.uniform(-2, 2), 2)
+        # Pressure with realistic atmospheric variations
+        base_pressure = 968.15 + math.sin(elapsed / 300) * 5 + random.uniform(-2, 2)
+        latest_data["pressure"] = round(base_pressure, 2)
+        
+        # Calculate altitude from pressure using MS5611 temperature
+        calculated_alt = self.calculate_altitude_from_pressure(
+            latest_data["pressure"], 
+            latest_data["ms5611_temp"]
+        )
+        latest_data["alt"] = calculated_alt
+        latest_data["alt_calculated"] = True  # Flag to indicate calculated altitude
+        
+        # Time data - Windows compatible formatting
+        now = datetime.now()
+        latest_data["utc_time"] = "00:00:00"  # No GPS time
+        latest_data["rtc_date"] = self.format_date_windows_compatible(now)
+        latest_data["rtc_time"] = now.strftime("%H:%M:%S")
         
         # Humidity with inverse temperature correlation
         base_humidity = 50 - (base_temp - 25) * 1.5
@@ -99,7 +130,7 @@ class DataReader:
         latest_data["heating_status"] = "ON" if latest_data["thermal_temp"] < target_temp else "OFF"
         latest_data["target_range"] = f"{config.THERMAL_TARGET_MIN} - {config.THERMAL_TARGET_MAX}"
         
-        print(f"📊 Generated mock data: GPS={latest_data['lat']:.2f},{latest_data['lon']:.2f}, Alt={latest_data['alt']}m, CO2={latest_data['co2']}ppm")
+        print(f"📊 Generated mock data: No GPS, Pressure={latest_data['pressure']}mbar, Calculated Alt={latest_data['alt']}m, CO2={latest_data['co2']}ppm")
 
     def parse_telemetry_block(self, data_block):
         """Parse a complete telemetry data block"""
@@ -112,18 +143,27 @@ class DataReader:
                 if not line:
                     continue
                 
-                # GPS coordinates and altitude
+                # GPS coordinates and altitude - check for "No Fix"
                 if line.startswith('GPS:'):
-                    # GPS: 3325.271972, 11155.243164 (Alt: 378.0 m)
-                    gps_pattern = r'GPS:\s*([\d.]+),\s*([\d.]+)\s*\(Alt:\s*([\d.]+)\s*m\)'
-                    match = re.search(gps_pattern, line)
-                    if match:
-                        latest_data["lat"] = float(match.group(1))
-                        latest_data["lon"] = float(match.group(2))
-                        latest_data["alt"] = float(match.group(3))
+                    if "No Fix" in line:
+                        latest_data["lat"] = 0.0
+                        latest_data["lon"] = 0.0
+                        latest_data["alt"] = 0.0  # Will be calculated from pressure
+                        latest_data["satellites"] = 0
                         data_updated = True
+                        print("📡 GPS: No Fix - will calculate altitude from pressure")
+                    else:
+                        # GPS: 3325.271972, 11155.243164 (Alt: 378.0 m)
+                        gps_pattern = r'GPS:\s*([\d.]+),\s*([\d.]+)\s*\(Alt:\s*([\d.]+)\s*m\)'
+                        match = re.search(gps_pattern, line)
+                        if match:
+                            latest_data["lat"] = float(match.group(1))
+                            latest_data["lon"] = float(match.group(2))
+                            latest_data["alt"] = float(match.group(3))
+                            latest_data["alt_calculated"] = False  # GPS altitude
+                            data_updated = True
                 
-                # Satellites
+                # Satellites (may be 0 when no GPS fix)
                 elif line.startswith('Sats:'):
                     match = re.search(r'Sats:\s*(\d+)', line)
                     if match:
@@ -211,13 +251,25 @@ class DataReader:
                 
                 # Target Range
                 elif line.startswith('Target Range:'):
-                    match = re.search(r'Target Range:\s*([\d.]+ - [\d.]+)', line)
+                    match = re.search(r'Target Range:\s*([\d.-]+ - [\d.-]+)', line)
                     if match:
                         latest_data["target_range"] = match.group(1)
                         data_updated = True
             
+            # After parsing all data, calculate altitude from pressure if no GPS altitude
+            if data_updated and (latest_data.get("lat", 0) == 0 or latest_data.get("alt", 0) == 0):
+                if "pressure" in latest_data and "ms5611_temp" in latest_data:
+                    calculated_alt = self.calculate_altitude_from_pressure(
+                        latest_data["pressure"], 
+                        latest_data["ms5611_temp"]
+                    )
+                    latest_data["alt"] = calculated_alt
+                    latest_data["alt_calculated"] = True
+                    print(f"🧮 Calculated altitude: {calculated_alt}m from pressure {latest_data['pressure']}mbar at {latest_data['ms5611_temp']}°C")
+            
             if data_updated:
-                print(f"📡 Parsed telemetry: GPS=({latest_data.get('lat', 'N/A')}, {latest_data.get('lon', 'N/A')}), Alt={latest_data.get('alt', 'N/A')}m, CO2={latest_data.get('co2', 'N/A')}ppm")
+                alt_source = "calculated" if latest_data.get("alt_calculated", False) else "GPS"
+                print(f"📡 Parsed telemetry: GPS=({latest_data.get('lat', 'N/A')}, {latest_data.get('lon', 'N/A')}), Alt={latest_data.get('alt', 'N/A')}m ({alt_source}), CO2={latest_data.get('co2', 'N/A')}ppm")
             
             return data_updated
                     
@@ -254,22 +306,29 @@ class DataReader:
                         self.data_buffer += chunk
                         
                         # Look for complete telemetry blocks
-                        if "=== COMBINED TELEMETRY ===" in self.data_buffer and "Target Range:" in self.data_buffer:
-                            # Extract the complete block
-                            start_marker = "=== COMBINED TELEMETRY ==="
-                            start_idx = self.data_buffer.find(start_marker)
+                        if ("GPS:" in self.data_buffer and "Target Range:" in self.data_buffer) or \
+                           ("==========================" in self.data_buffer):
+                            # Extract a complete block of data
+                            lines = self.data_buffer.split('\n')
                             
-                            if start_idx != -1:
-                                block_start = start_idx + len(start_marker)
-                                # Look for the end of this block (next start marker or end of buffer)
-                                next_start = self.data_buffer.find(start_marker, block_start)
+                            # Find start and end of a complete data block
+                            start_idx = -1
+                            end_idx = -1
+                            
+                            for i, line in enumerate(lines):
+                                if line.strip().startswith('GPS:'):
+                                    start_idx = i
+                                elif line.strip() == "==========================":
+                                    end_idx = i
+                                    break
+                            
+                            if start_idx != -1 and end_idx != -1:
+                                block_lines = lines[start_idx:end_idx+1]
+                                block = '\n'.join(block_lines)
                                 
-                                if next_start != -1:
-                                    block = self.data_buffer[block_start:next_start]
-                                    self.data_buffer = self.data_buffer[next_start:]  # Keep remaining data
-                                else:
-                                    block = self.data_buffer[block_start:]
-                                    self.data_buffer = ""
+                                # Remove processed data from buffer
+                                remaining_lines = lines[end_idx+1:]
+                                self.data_buffer = '\n'.join(remaining_lines)
                                 
                                 # Parse the complete block
                                 if block.strip():
@@ -327,6 +386,7 @@ class DataReader:
                     latest_data.get("lat", ""),
                     latest_data.get("lon", ""),
                     latest_data.get("alt", ""),
+                    latest_data.get("alt_calculated", False),  # New field
                     latest_data.get("satellites", ""),
                     latest_data.get("utc_time", ""),
                     latest_data.get("rtc_date", ""),
@@ -366,7 +426,8 @@ class DataReader:
                 "source": "mock" if config.USE_MOCK else "device"
             }
             
-            print(f"🚀 Emitting data: GPS=({lat_decimal:.4f}, {lon_decimal:.4f}), Alt={data_to_send.get('alt', 'N/A')}m, CO2={data_to_send.get('co2', 'N/A')}ppm")
+            alt_source = "calculated" if latest_data.get("alt_calculated", False) else "GPS"
+            print(f"🚀 Emitting data: GPS=({lat_decimal:.4f}, {lon_decimal:.4f}), Alt={data_to_send.get('alt', 'N/A')}m ({alt_source}), CO2={data_to_send.get('co2', 'N/A')}ppm")
             self.socketio.emit("new_data", data_to_send)
             print(f"✅ Data emitted successfully")
             
@@ -380,6 +441,7 @@ class DataReader:
         print(f"🚀 Starting data reader - Mode: {'Mock' if config.USE_MOCK else 'Serial Device'}")
         print(f"📡 Port: {config.SERIAL_PORT} | Baud: {config.BAUD_RATE} | Timeout: {config.TIMEOUT}s")
         print(f"⏰ Update interval: {config.MOCK_UPDATE_INTERVAL} seconds")
+        print(f"🧮 Altitude calculation: Pressure-based when GPS unavailable")
         
         iteration_count = 0
         consecutive_failures = 0
