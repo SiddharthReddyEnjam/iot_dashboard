@@ -326,17 +326,39 @@
         color: #888;
       }
 
-      /* Live Plots Card */
+      /* Live Plots Card - Enhanced */
       .live-plots {
         border-left: 4px solid #ffeaa7;
       }
 
       .chart-controls {
+        margin-bottom: 15px;
+      }
+
+      .chart-control-section {
+        margin-bottom: 12px;
+      }
+
+      .chart-control-label {
+        font-size: 0.9em;
+        font-weight: 600;
+        color: #555;
+        margin-bottom: 8px;
+        display: block;
+      }
+
+      .chart-buttons {
         display: flex;
         justify-content: center;
         gap: 8px;
-        margin-bottom: 15px;
         flex-wrap: wrap;
+      }
+
+      .x-axis-buttons {
+        display: flex;
+        justify-content: center;
+        gap: 8px;
+        margin-bottom: 8px;
       }
 
       .chart-btn {
@@ -357,10 +379,23 @@
 
       .chart-btn.active {
         background: #4caf50;
+        box-shadow: 0 2px 8px rgba(76, 175, 80, 0.3);
+      }
+
+      .axis-btn {
+        background: #ff6b6b;
+      }
+
+      .axis-btn:hover {
+        background: #ff5252;
+      }
+
+      .axis-btn.active {
+        background: #e91e63;
       }
 
       .chart-container {
-        height: 300px;
+        height: 320px;
         position: relative;
       }
 
@@ -416,6 +451,12 @@
           justify-content: center;
           margin-bottom: 20px;
         }
+
+        .chart-buttons,
+        .x-axis-buttons {
+          flex-direction: column;
+          align-items: center;
+        }
       }
 
       /* Color coding for temperature ranges */
@@ -430,6 +471,17 @@
       }
       .temp-hot {
         color: #ff6b6b;
+      }
+
+      /* Chart info display */
+      .chart-info {
+        text-align: center;
+        margin-bottom: 10px;
+        padding: 8px;
+        background: rgba(102, 126, 234, 0.1);
+        border-radius: 8px;
+        font-size: 0.9em;
+        color: #555;
       }
     </style>
   </head>
@@ -615,7 +667,7 @@
           </div>
         </div>
 
-        <!-- Live Plots -->
+        <!-- Enhanced Live Plots -->
         <div class="card live-plots">
           <div class="card-header">
             <i class="fas fa-chart-line"></i>
@@ -623,22 +675,50 @@
           </div>
 
           <div class="chart-controls">
-            <button class="chart-btn active" onclick="showChart('co2')">
-              CO₂
-            </button>
-            <button class="chart-btn" onclick="showChart('temperature')">
-              Temp
-            </button>
-            <button class="chart-btn" onclick="showChart('humidity')">
-              Humidity
-            </button>
-            <button class="chart-btn" onclick="showChart('pressure')">
-              Pressure
-            </button>
-            <button class="chart-btn" onclick="showChart('altitude')">
-              Altitude
-            </button>
+            <!-- X-Axis Selection -->
+            <div class="chart-control-section">
+              <span class="chart-control-label">X-Axis:</span>
+              <div class="x-axis-buttons">
+                <button
+                  class="chart-btn axis-btn active"
+                  onclick="setXAxis('time')"
+                >
+                  <i class="fas fa-clock"></i> Time
+                </button>
+                <button
+                  class="chart-btn axis-btn"
+                  onclick="setXAxis('altitude')"
+                >
+                  <i class="fas fa-mountain"></i> Altitude
+                </button>
+              </div>
+            </div>
+
+            <!-- Chart Type Selection -->
+            <div class="chart-control-section">
+              <span class="chart-control-label">Plot:</span>
+              <div class="chart-buttons">
+                <button class="chart-btn active" onclick="showChart('co2')">
+                  CO₂
+                </button>
+                <button class="chart-btn" onclick="showChart('ds18b20_temp')">
+                  DS18B20 Temp
+                </button>
+                <button class="chart-btn" onclick="showChart('thermal_temp')">
+                  Thermal Temp
+                </button>
+                <button class="chart-btn" onclick="showChart('humidity')">
+                  Humidity
+                </button>
+                <button class="chart-btn" onclick="showChart('pressure')">
+                  Pressure
+                </button>
+              </div>
+            </div>
           </div>
+
+          <!-- Chart Info Display -->
+          <div class="chart-info" id="chartInfo">Showing CO₂ vs Time</div>
 
           <div class="chart-container">
             <canvas id="dataChart"></canvas>
@@ -677,13 +757,51 @@
     <script>
       // Global variables
       let currentChart = 'co2';
+      let currentXAxis = 'time';
       let chartData = {
-        labels: [],
+        labels: [], // Time labels
+        altitudeLabels: [], // Altitude labels
         co2: [],
-        temperature: [],
+        ds18b20_temp: [],
+        thermal_temp: [],
         humidity: [],
         pressure: [],
         altitude: [],
+        timestamps: [], // Store actual timestamps for calculations
+      };
+
+      // Chart configurations for different data types
+      const chartConfigs = {
+        co2: {
+          label: 'CO₂',
+          unit: 'ppm',
+          color: '#45b7d1',
+          backgroundColor: 'rgba(69, 183, 209, 0.1)',
+        },
+        ds18b20_temp: {
+          label: 'DS18B20 Temperature',
+          unit: '°C',
+          color: '#ff6b6b',
+          backgroundColor: 'rgba(255, 107, 107, 0.1)',
+        },
+        thermal_temp: {
+          label: 'Thermal System Temperature',
+          unit: '°C',
+          color: '#ff9800',
+          backgroundColor: 'rgba(255, 152, 0, 0.1)',
+        },
+        humidity: {
+          label: 'Humidity',
+          unit: '%',
+          color: '#4ecdc4',
+          backgroundColor: 'rgba(78, 205, 196, 0.1)',
+        },
+        pressure: {
+          label: 'Pressure',
+          unit: 'mbar',
+          color: '#ffa726',
+          backgroundColor: 'rgba(255, 167, 38, 0.1)',
+        },
       };
 
       // Current configuration
@@ -708,6 +826,8 @@
               borderWidth: 2,
               tension: 0.4,
               fill: true,
+              pointRadius: 3,
+              pointHoverRadius: 6,
             },
           ],
         },
@@ -719,19 +839,43 @@
               display: true,
               position: 'top',
             },
+            tooltip: {
+              mode: 'index',
+              intersect: false,
+              callbacks: {
+                title: function (tooltipItems) {
+                  const index = tooltipItems[0].dataIndex;
+                  const timeLabel = chartData.labels[index];
+                  const altLabel = chartData.altitudeLabels[index];
+                  return `Time: ${timeLabel} | Alt: ${altLabel}m`;
+                },
+              },
+            },
           },
           scales: {
             x: {
               display: true,
               grid: { color: 'rgba(0,0,0,0.1)' },
+              title: {
+                display: true,
+                text: 'Time',
+              },
             },
             y: {
               beginAtZero: false,
               grid: { color: 'rgba(0,0,0,0.1)' },
+              title: {
+                display: true,
+                text: 'Value',
+              },
             },
           },
           animation: {
             duration: 300,
+          },
+          interaction: {
+            mode: 'index',
+            intersect: false,
           },
         },
       });
@@ -825,21 +969,28 @@
 
       function updateChart(data) {
         const time = new Date(data.timestamp * 1000).toLocaleTimeString();
+        const altitude = data.alt.toFixed(1);
 
+        // Add new data points
         chartData.labels.push(time);
+        chartData.altitudeLabels.push(altitude);
+        chartData.timestamps.push(data.timestamp);
         chartData.co2.push(data.co2);
-        chartData.temperature.push(
-          (data.ms5611_temp + data.ds18b20_temp + data.scd30_temp) / 3
-        );
+        chartData.ds18b20_temp.push(data.ds18b20_temp);
+        chartData.thermal_temp.push(data.thermal_temp);
         chartData.humidity.push(data.rh);
         chartData.pressure.push(data.pressure);
         chartData.altitude.push(data.alt);
 
-        // Keep only last 50 points
-        if (chartData.labels.length > 50) {
+        // Keep only last 50 points for performance
+        const maxPoints = 50;
+        if (chartData.labels.length > maxPoints) {
           chartData.labels.shift();
+          chartData.altitudeLabels.shift();
+          chartData.timestamps.shift();
           chartData.co2.shift();
-          chartData.temperature.shift();
+          chartData.ds18b20_temp.shift();
+          chartData.thermal_temp.shift();
           chartData.humidity.shift();
           chartData.pressure.shift();
           chartData.altitude.shift();
@@ -848,55 +999,62 @@
         updateChartDisplay();
       }
 
+      function setXAxis(axisType) {
+        currentXAxis = axisType;
+
+        // Update button states
+        document
+          .querySelectorAll('.axis-btn')
+          .forEach((btn) => btn.classList.remove('active'));
+        event.target.classList.add('active');
+
+        updateChartDisplay();
+        updateChartInfo();
+      }
+
       function showChart(type) {
         currentChart = type;
 
         // Update button states
         document
-          .querySelectorAll('.chart-btn')
+          .querySelectorAll('.chart-buttons .chart-btn')
           .forEach((btn) => btn.classList.remove('active'));
         event.target.classList.add('active');
 
         updateChartDisplay();
+        updateChartInfo();
+      }
+
+      function updateChartInfo() {
+        const config = chartConfigs[currentChart];
+        const xAxisLabel = currentXAxis === 'time' ? 'Time' : 'Altitude (m)';
+        const chartInfo = document.getElementById('chartInfo');
+        chartInfo.textContent = `Showing ${config.label} vs ${xAxisLabel}`;
       }
 
       function updateChartDisplay() {
         let dataset = chart.data.datasets[0];
+        const config = chartConfigs[currentChart];
 
-        switch (currentChart) {
-          case 'co2':
-            dataset.label = 'CO₂ (ppm)';
-            dataset.data = [...chartData.co2];
-            dataset.borderColor = '#45b7d1';
-            dataset.backgroundColor = 'rgba(69, 183, 209, 0.1)';
-            break;
-          case 'temperature':
-            dataset.label = 'Average Temperature (°C)';
-            dataset.data = [...chartData.temperature];
-            dataset.borderColor = '#ff6b6b';
-            dataset.backgroundColor = 'rgba(255, 107, 107, 0.1)';
-            break;
-          case 'humidity':
-            dataset.label = 'Humidity (%)';
-            dataset.data = [...chartData.humidity];
-            dataset.borderColor = '#4ecdc4';
-            dataset.backgroundColor = 'rgba(78, 205, 196, 0.1)';
-            break;
-          case 'pressure':
-            dataset.label = 'Pressure (mbar)';
-            dataset.data = [...chartData.pressure];
-            dataset.borderColor = '#ffa726';
-            dataset.backgroundColor = 'rgba(255, 167, 38, 0.1)';
-            break;
-          case 'altitude':
-            dataset.label = 'Altitude (m)';
-            dataset.data = [...chartData.altitude];
-            dataset.borderColor = '#ffeaa7';
-            dataset.backgroundColor = 'rgba(255, 234, 167, 0.1)';
-            break;
+        // Update dataset properties
+        dataset.label = `${config.label} (${config.unit})`;
+        dataset.data = [...chartData[currentChart]];
+        dataset.borderColor = config.color;
+        dataset.backgroundColor = config.backgroundColor;
+
+        // Update labels based on X-axis selection
+        if (currentXAxis === 'time') {
+          chart.data.labels = [...chartData.labels];
+          chart.options.scales.x.title.text = 'Time';
+        } else {
+          chart.data.labels = [...chartData.altitudeLabels];
+          chart.options.scales.x.title.text = 'Altitude (m)';
         }
 
-        chart.data.labels = [...chartData.labels];
+        // Update Y-axis title
+        chart.options.scales.y.title.text = `${config.label} (${config.unit})`;
+
+        // Update chart
         chart.update('none');
       }
 
@@ -965,20 +1123,27 @@
       }
 
       function exportData() {
-        // Create CSV content with all sensor data
+        // Create comprehensive CSV content
         let csv =
-          'timestamp,lat_decimal,lon_decimal,altitude,satellites,utc_time,rtc_date,rtc_time,';
+          'timestamp,time_label,altitude,latitude,longitude,satellites,utc_time,rtc_date,rtc_time,';
         csv +=
-          'ms5611_temp,ds18b20_temp,scd30_temp,thermal_temp,pressure,humidity,co2,heating_status,target_range\n';
+          'ms5611_temp,ds18b20_temp,thermal_temp,scd30_temp,pressure,humidity,co2,heating_status,target_range\n';
 
         for (let i = 0; i < chartData.labels.length; i++) {
-          // This is simplified - in a real implementation, you'd store all the raw data
-          csv += `${chartData.labels[i]},`;
-          csv += `${chartData.temperature[i] || ''},`; // Simplified
-          csv += `${chartData.altitude[i] || ''},`;
+          const timestamp = chartData.timestamps[i] || '';
+          const timeLabel = chartData.labels[i] || '';
+          const altitude = chartData.altitude[i] || '';
+
+          csv += `${timestamp},${timeLabel},${altitude},`;
+          csv += `,,,,,,`; // GPS and time data placeholders
+          csv += `${chartData.ms5611_temp?.[i] || ''},`;
+          csv += `${chartData.ds18b20_temp[i] || ''},`;
+          csv += `${chartData.thermal_temp[i] || ''},`;
+          csv += `,`; // scd30_temp placeholder
+          csv += `${chartData.pressure[i] || ''},`;
           csv += `${chartData.humidity[i] || ''},`;
           csv += `${chartData.co2[i] || ''},`;
-          csv += `${chartData.pressure[i] || ''}\n`;
+          csv += `,\n`; // heating_status, target_range placeholders
         }
 
         // Download CSV
@@ -995,7 +1160,7 @@
 
       // Initialize the dashboard
       function initializeDashboard() {
-        console.log('Initializing dashboard...');
+        console.log('Initializing enhanced dashboard...');
 
         // Set initial status
         document.getElementById('connectionStatus').style.background =
@@ -1004,15 +1169,17 @@
         document.getElementById('currentPort').textContent =
           currentConfig.comPort;
 
-        // Initialize chart with CO2 data
+        // Initialize chart with CO2 data and time axis
         showChart('co2');
+        setXAxis('time');
+        updateChartInfo();
 
         // Start mock data generation (replace with WebSocket connection in production)
         if (currentConfig.useMock) {
           setInterval(generateMockData, 2000); // Update every 2 seconds
         }
 
-        console.log('Dashboard initialized successfully');
+        console.log('Enhanced dashboard initialized successfully');
       }
 
       // WebSocket connection
@@ -1040,6 +1207,56 @@
           now.toLocaleTimeString();
         document.getElementById('dataSource').textContent =
           data.source === 'mock' ? 'Mock Data' : 'Device Data';
+      });
+
+      // Keyboard shortcuts for chart switching
+      document.addEventListener('keydown', function (e) {
+        if (e.ctrlKey) {
+          switch (e.key) {
+            case '1':
+              e.preventDefault();
+              document
+                .querySelector('.chart-buttons .chart-btn:nth-child(1)')
+                .click();
+              break;
+            case '2':
+              e.preventDefault();
+              document
+                .querySelector('.chart-buttons .chart-btn:nth-child(2)')
+                .click();
+              break;
+            case '3':
+              e.preventDefault();
+              document
+                .querySelector('.chart-buttons .chart-btn:nth-child(3)')
+                .click();
+              break;
+            case '4':
+              e.preventDefault();
+              document
+                .querySelector('.chart-buttons .chart-btn:nth-child(4)')
+                .click();
+              break;
+            case '5':
+              e.preventDefault();
+              document
+                .querySelector('.chart-buttons .chart-btn:nth-child(5)')
+                .click();
+              break;
+            case 't':
+              e.preventDefault();
+              document
+                .querySelector('.x-axis-buttons .axis-btn:nth-child(1)')
+                .click();
+              break;
+            case 'a':
+              e.preventDefault();
+              document
+                .querySelector('.x-axis-buttons .axis-btn:nth-child(2)')
+                .click();
+              break;
+          }
+        }
       });
 
       // Start the dashboard when page loads
