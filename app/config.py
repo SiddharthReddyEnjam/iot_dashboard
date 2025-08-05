@@ -13,12 +13,12 @@ AVAILABLE_BAUD_RATES = [9600, 19200, 38400, 57600, 115200]
 CSV_FILE = 'payload_log.csv'
 
 # Mock data settings
-MOCK_UPDATE_INTERVAL = 1  # seconds (changed from 2 to 1)
+MOCK_UPDATE_INTERVAL = 1
 MOCK_REALISTIC_VARIATIONS = True  # Enable realistic sensor variations
 
 # Dashboard settings
 MAX_CHART_POINTS = 50  # Maximum points to show on charts
-UPDATE_FREQUENCY = 1000  # milliseconds for frontend updates (changed from 2000 to 1000)
+UPDATE_FREQUENCY = 1000 
 
 # GPS coordinate conversion settings
 DEFAULT_GPS_FORMAT = "DDMM.MMMMM"  # Format from your device

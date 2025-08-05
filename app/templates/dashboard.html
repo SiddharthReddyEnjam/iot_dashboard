@@ -67,7 +67,7 @@
         height: 10px;
         background: #4caf50;
         border-radius: 50%;
-        animation: pulse 2s infinite;
+        animation: pulse 1s infinite; /* Changed from 2s to 1s */
       }
 
       @keyframes pulse {
@@ -425,6 +425,35 @@
         margin-top: 20px;
       }
 
+      /* Real-time indicator */
+      .realtime-indicator {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        font-size: 0.85em;
+        color: rgba(255, 255, 255, 0.9);
+      }
+
+      .realtime-dot {
+        width: 8px;
+        height: 8px;
+        background: #4caf50;
+        border-radius: 50%;
+        animation: realtimePulse 1s infinite;
+      }
+
+      @keyframes realtimePulse {
+        0%,
+        100% {
+          opacity: 1;
+          transform: scale(1);
+        }
+        50% {
+          opacity: 0.7;
+          transform: scale(1.1);
+        }
+      }
+
       /* Responsive design */
       @media (max-width: 1200px) {
         .dashboard-main {
@@ -493,6 +522,10 @@
           High Altitude Weather Balloon - Environmental Monitoring & GPS
           Tracking
         </p>
+        <!-- <div class="realtime-indicator">
+          <div class="realtime-dot"></div>
+          <span>Live Data - Updates every 1 second</span>
+        </div> -->
       </div>
 
       <div class="status-bar">
@@ -811,6 +844,10 @@
         useMock: true,
       };
 
+      // Last update tracking for delay detection
+      let lastUpdateTime = 0;
+      let expectedUpdateInterval = 1000; // 1 second in milliseconds
+
       // Chart setup
       const ctx = document.getElementById('dataChart').getContext('2d');
       const chart = new Chart(ctx, {
@@ -871,7 +908,7 @@
             },
           },
           animation: {
-            duration: 300,
+            duration: 200, // Reduced from 300 for faster updates
           },
           interaction: {
             mode: 'index',
@@ -879,41 +916,6 @@
           },
         },
       });
-
-      // Mock data generator for demonstration
-      function generateMockData() {
-        const now = new Date();
-        const time = now.toLocaleTimeString();
-
-        const mockData = {
-          timestamp: now.getTime() / 1000,
-          lat: 3325.271972 + (Math.random() - 0.5) * 0.01,
-          lon: 11155.243164 + (Math.random() - 0.5) * 0.01,
-          alt: 378.0 + (Math.random() - 0.5) * 50,
-          satellites: Math.floor(Math.random() * 5) + 7,
-          utc_time: time,
-          rtc_date: now.toLocaleDateString(),
-          rtc_time: time,
-          ms5611_temp: 25.95 + (Math.random() - 0.5) * 4,
-          pressure: 970.81 + (Math.random() - 0.5) * 20,
-          ds18b20_temp: 25.62 + (Math.random() - 0.5) * 3,
-          scd30_temp: 26.91 + (Math.random() - 0.5) * 3,
-          rh: 39.73 + (Math.random() - 0.5) * 10,
-          co2: 732.9 + (Math.random() - 0.5) * 100,
-          thermal_temp: 26.04 + (Math.random() - 0.5) * 2,
-          heating_status: Math.random() > 0.5 ? 'ON' : 'OFF',
-          target_range: '29.4 - 29.6',
-          source: currentConfig.useMock ? 'mock' : 'device',
-        };
-
-        updateDisplay(mockData);
-        updateChart(mockData);
-
-        document.getElementById('timestamp').textContent = now.toLocaleString();
-        document.getElementById('lastUpdate').textContent = time;
-        document.getElementById('dataSource').textContent =
-          mockData.source === 'mock' ? 'Mock Data' : 'Device Data';
-      }
 
       function convertGpsToDecimal(coord) {
         const degrees = Math.floor(coord / 100);
@@ -1054,7 +1056,7 @@
         // Update Y-axis title
         chart.options.scales.y.title.text = `${config.label} (${config.unit})`;
 
-        // Update chart
+        // Update chart with no animation for real-time feel
         chart.update('none');
       }
 
@@ -1158,9 +1160,25 @@
         window.URL.revokeObjectURL(url);
       }
 
+      // Update delay detection and timing
+      function checkUpdateDelay() {
+        const now = Date.now();
+        const timeSinceLastUpdate = now - lastUpdateTime;
+
+        if (
+          lastUpdateTime > 0 &&
+          timeSinceLastUpdate > expectedUpdateInterval * 1.5
+        ) {
+          console.warn(
+            `Data delay detected: ${timeSinceLastUpdate}ms since last update`
+          );
+          // Visual indicator could be added here
+        }
+      }
+
       // Initialize the dashboard
       function initializeDashboard() {
-        console.log('Initializing enhanced dashboard...');
+        console.log('Initializing enhanced dashboard with 1-second updates...');
 
         // Set initial status
         document.getElementById('connectionStatus').style.background =
@@ -1174,42 +1192,57 @@
         setXAxis('time');
         updateChartInfo();
 
-        // Start mock data generation (replace with WebSocket connection in production)
-        if (currentConfig.useMock) {
-          setInterval(generateMockData, 1000); // Update every 1 second
-        }
+        // Start delay checking
+        setInterval(checkUpdateDelay, 500); // Check every 500ms
 
-        console.log('Enhanced dashboard initialized successfully');
+        console.log(
+          'Enhanced dashboard initialized with 1-second real-time updates'
+        );
       }
 
-      // WebSocket connection
+      // WebSocket connection with improved timing
       const socket = io();
 
       socket.on('connect', function () {
+        console.log('WebSocket connected');
         document.getElementById('connectionStatus').style.background =
           '#4CAF50';
         document.getElementById('connectionText').textContent = 'Connected';
       });
 
       socket.on('disconnect', function () {
+        console.log('WebSocket disconnected');
         document.getElementById('connectionStatus').style.background =
           '#f44336';
         document.getElementById('connectionText').textContent = 'Disconnected';
       });
 
       socket.on('new_data', function (data) {
+        const receiveTime = Date.now();
+        lastUpdateTime = receiveTime;
+
+        // Update display immediately
         updateDisplay(data);
         updateChart(data);
 
-        const now = new Date(data.timestamp * 1000);
-        document.getElementById('timestamp').textContent = now.toLocaleString();
+        // Update timestamps
+        const dataTime = new Date(data.timestamp * 1000);
+        document.getElementById('timestamp').textContent =
+          dataTime.toLocaleString();
         document.getElementById('lastUpdate').textContent =
-          now.toLocaleTimeString();
+          dataTime.toLocaleTimeString();
         document.getElementById('dataSource').textContent =
           data.source === 'mock' ? 'Mock Data' : 'Device Data';
+
+        // Log timing for debugging
+        const processingDelay = receiveTime - data.timestamp * 1000;
+        if (processingDelay > 100) {
+          // Log if delay > 100ms
+          console.log(`Processing delay: ${processingDelay}ms`);
+        }
       });
 
-      // Keyboard shortcuts for chart switching
+      // Enhanced keyboard shortcuts for chart switching
       document.addEventListener('keydown', function (e) {
         if (e.ctrlKey) {
           switch (e.key) {

@@ -336,7 +336,7 @@ class DataReader:
                         
                         # Prevent buffer from getting too large
                         if len(self.data_buffer) > 2000:
-                            self.data_buffer = self.data_buffer[-1000:]  # Keep last 1000 chars
+                            self.data_buffer = self.data_buffer[-1000:]  
                             
                     except UnicodeDecodeError:
                         print("⚠️ Unicode decode error, skipping chunk")
@@ -437,54 +437,72 @@ class DataReader:
             traceback.print_exc()
 
     def run_reader(self):
-        """Main reader loop"""
+        """Main reader loop with precise 1-second timing"""
         print(f"🚀 Starting data reader - Mode: {'Mock' if config.USE_MOCK else 'Serial Device'}")
         print(f"📡 Port: {config.SERIAL_PORT} | Baud: {config.BAUD_RATE} | Timeout: {config.TIMEOUT}s")
-        print(f"⏰ Update interval: {config.MOCK_UPDATE_INTERVAL} seconds")
+        print(f"⏰ Update interval: {config.MOCK_UPDATE_INTERVAL} seconds (precise timing)")
         print(f"🧮 Altitude calculation: Pressure-based when GPS unavailable")
         
         iteration_count = 0
         consecutive_failures = 0
         max_failures = 5
+        next_update_time = time.time() + config.MOCK_UPDATE_INTERVAL  # Schedule first update
         
         while self.running:
             try:
-                timestamp = time.time()
-                data_updated = False
-                iteration_count += 1
+                current_time = time.time()
                 
-                print(f"🔄 Reader iteration #{iteration_count} ({'Mock' if config.USE_MOCK else 'Device'})")
-                
-                if config.USE_MOCK:
-                    self.generate_realistic_mock_data()
-                    data_updated = True
-                    consecutive_failures = 0
-                else:
-                    data_updated = self.read_serial_data()
+                # Check if it's time for the next update
+                if current_time >= next_update_time:
+                    start_time = current_time
+                    timestamp = current_time
+                    data_updated = False
+                    iteration_count += 1
                     
-                    if data_updated:
+                    print(f"🔄 Reader iteration #{iteration_count} ({'Mock' if config.USE_MOCK else 'Device'}) - {time.strftime('%H:%M:%S', time.localtime(current_time))}")
+                    
+                    if config.USE_MOCK:
+                        self.generate_realistic_mock_data()
+                        data_updated = True
                         consecutive_failures = 0
                     else:
-                        consecutive_failures += 1
-                        print(f"⚠️ No data received (failure #{consecutive_failures}/{max_failures})")
+                        data_updated = self.read_serial_data()
                         
-                        if consecutive_failures >= max_failures:
-                            print(f"❌ Too many failures, switching to mock mode temporarily")
-                            # Don't actually switch config.USE_MOCK, just generate mock data for this iteration
-                            self.generate_realistic_mock_data()
-                            data_updated = True
+                        if data_updated:
                             consecutive_failures = 0
+                        else:
+                            consecutive_failures += 1
+                            print(f"⚠️ No data received (failure #{consecutive_failures}/{max_failures})")
+                            
+                            if consecutive_failures >= max_failures:
+                                print(f"❌ Too many failures, switching to mock mode temporarily")
+                                # Don't actually switch config.USE_MOCK, just generate mock data for this iteration
+                                self.generate_realistic_mock_data()
+                                data_updated = True
+                                consecutive_failures = 0
+                    
+                    if data_updated:
+                        print(f"📈 Data updated, logging and emitting...")
+                        self.update_history(timestamp)
+                        self.log_data_to_csv(timestamp)
+                        self.emit_data(timestamp)
+                        update_system_status("mock" if config.USE_MOCK else "device")
+                    else:
+                        print(f"⚠️ No data update in iteration #{iteration_count}")
+                    
+                    # Schedule next update time (precise intervals)
+                    processing_time = time.time() - start_time
+                    next_update_time += config.MOCK_UPDATE_INTERVAL
+                    
+                    # If we're falling behind, catch up but warn
+                    if next_update_time <= time.time():
+                        print(f"⚠️ Processing took {processing_time:.3f}s, falling behind schedule")
+                        next_update_time = time.time() + config.MOCK_UPDATE_INTERVAL
+                    
+                    print(f"⏱️ Next update scheduled in {next_update_time - time.time():.3f}s")
                 
-                if data_updated:
-                    print(f"📈 Data updated, logging and emitting...")
-                    self.update_history(timestamp)
-                    self.log_data_to_csv(timestamp)
-                    self.emit_data(timestamp)
-                    update_system_status("mock" if config.USE_MOCK else "device")
-                else:
-                    print(f"⚠️ No data update in iteration #{iteration_count}")
-                
-                time.sleep(config.MOCK_UPDATE_INTERVAL)
+                # Short sleep to prevent busy waiting
+                time.sleep(0.01)  # 10ms sleep
                 
             except KeyboardInterrupt:
                 print("🛑 Reader stopped by user")
@@ -494,12 +512,12 @@ class DataReader:
                 import traceback
                 traceback.print_exc()
                 consecutive_failures += 1
-                time.sleep(1)  # Brief pause on error
+                time.sleep(0.1)  # Brief pause on error
                 
                 if consecutive_failures >= max_failures:
                     print("❌ Too many errors, stopping reader")
-                    break
-
+                    break      
+      
     def start(self):
         """Start the reader thread"""
         print(f"🔧 Starting DataReader thread...")
