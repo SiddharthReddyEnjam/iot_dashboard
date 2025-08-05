@@ -1,7 +1,7 @@
 # app/config.py
 
 # Data source configuration
-USE_MOCK = True  # Set to False to use real serial device
+USE_MOCK = False  # Set to False to use real serial device
 SERIAL_PORT = 'COM7'  # Default COM port - can be changed via UI
 BAUD_RATE = 9600  # Default baud rate - can be changed via UI
 TIMEOUT = 1
@@ -13,12 +13,12 @@ AVAILABLE_BAUD_RATES = [9600, 19200, 38400, 57600, 115200]
 CSV_FILE = 'payload_log.csv'
 
 # Mock data settings
-MOCK_UPDATE_INTERVAL = 2  # seconds (increased to match UI)
+MOCK_UPDATE_INTERVAL = 1  # seconds (changed from 2 to 1)
 MOCK_REALISTIC_VARIATIONS = True  # Enable realistic sensor variations
 
 # Dashboard settings
 MAX_CHART_POINTS = 50  # Maximum points to show on charts
-UPDATE_FREQUENCY = 2000  # milliseconds for frontend updates
+UPDATE_FREQUENCY = 1000  # milliseconds for frontend updates (changed from 2000 to 1000)
 
 # GPS coordinate conversion settings
 DEFAULT_GPS_FORMAT = "DDMM.MMMMM"  # Format from your device

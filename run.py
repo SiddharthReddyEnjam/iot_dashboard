@@ -28,7 +28,7 @@ def print_banner():
     
     print(f"📁 CSV Log: {config.CSV_FILE}")
     print(f"🌐 Dashboard: http://localhost:5001")
-    print(f"⏰ Update Interval: {config.MOCK_UPDATE_INTERVAL} seconds")
+    print(f"⏰ Update Interval: {config.MOCK_UPDATE_INTERVAL} second{'s' if config.MOCK_UPDATE_INTERVAL != 1 else ''}")
     print(f"📈 Max Chart Points: {config.MAX_CHART_POINTS}")
     print("=" * 80)
 
@@ -188,7 +188,7 @@ def main():
     print(f"   Press Ctrl+C to stop")
     print("\n📊 REAL-TIME DATA:")
     print(f"   Source: {'Mock Generator' if config.USE_MOCK else config.SERIAL_PORT}")
-    print(f"   Update Rate: Every {config.MOCK_UPDATE_INTERVAL} seconds")
+    print(f"   Update Rate: Every {config.MOCK_UPDATE_INTERVAL} second{'s' if config.MOCK_UPDATE_INTERVAL != 1 else ''}")
     print(f"   CSV Logging: {config.CSV_FILE}")
     print("\n" + "=" * 80)
     
