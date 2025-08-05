@@ -1,7 +1,7 @@
 # app/config.py
 
 # Data source configuration
-USE_MOCK = False  # Set to False to use real serial device
+USE_MOCK = True  # Set to False to use real serial device
 SERIAL_PORT = 'COM7'  # Default COM port - can be changed via UI
 BAUD_RATE = 9600  # Default baud rate - can be changed via UI
 TIMEOUT = 1
